@@ -53,9 +53,32 @@ dtb-$(CONFIG_ARCH_AT91)	+= at91-sama5d4ek.dtb
 
 dtb-$(CONFIG_ARCH_ATLAS6) += atlas6-evb.dtb
 dtb-$(CONFIG_ARCH_AXXIA) += axm5516-amarillo.dtb
+
+# Raspberry Pi
+ifeq ($(CONFIG_BCM2708_DT),y)
+   RPI_DT_OVERLAYS=y
+endif
+ifeq ($(CONFIG_BCM2709_DT),y)
+   RPI_DT_OVERLAYS=y
+endif
 dtb-$(CONFIG_BCM2708_DT) += bcm2708-rpi-b.dtb
 dtb-$(CONFIG_BCM2708_DT) += bcm2708-rpi-b-plus.dtb
+dtb-$(CONFIG_BCM2709_DT) += bcm2709-rpi-2-b.dtb
+dtb-$(RPI_DT_OVERLAYS) += ds1307-rtc-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += hifiberry-dac-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += hifiberry-dacplus-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += hifiberry-digi-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += hifiberry-amp-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += iqaudio-dac-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += iqaudio-dacplus-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += lirc-rpi-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += pcf2127-rtc-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += pcf8523-rtc-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += pps-gpio-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += w1-gpio-overlay.dtb
+dtb-$(RPI_DT_OVERLAYS) += w1-gpio-pullup-overlay.dtb
 dtb-$(CONFIG_ARCH_BCM2835) += bcm2835-rpi-b.dtb
+
 dtb-$(CONFIG_ARCH_BCM_5301X) += bcm4708-netgear-r6250.dtb
 dtb-$(CONFIG_ARCH_BCM_63XX) += bcm963138dvt.dtb
 dtb-$(CONFIG_ARCH_BCM_MOBILE) += bcm28155-ap.dtb \
@@ -522,6 +545,11 @@ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6589-aquaris5.dtb
 targets += dtbs dtbs_install
 targets += $(dtb-y)
 
+endif
+
+# Enable fixups to support overlays on BCM2708 platforms
+ifeq ($(RPI_DT_OVERLAYS),y)
+	DTC_FLAGS ?= -@
 endif
 
 # *.dtb used to be generated in the directory above. Clean out the

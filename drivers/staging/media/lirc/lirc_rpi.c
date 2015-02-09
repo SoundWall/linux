@@ -79,8 +79,7 @@ static bool softcarrier = 1;
 static bool invert = 0;
 
 struct gpio_chip *gpiochip;
-struct irq_chip *irqchip;
-struct irq_data *irqdata;
+static int irq_num;
 
 /* forward declarations */
 static long send_pulse(unsigned long length);
@@ -246,9 +245,6 @@ static irqreturn_t irq_handler(int i, void *blah, struct pt_regs *regs)
 	/* use the GPIO signal level */
 	signal = gpiochip->get(gpiochip, gpio_in_pin);
 
-	/* unmask the irq */
-	irqchip->irq_unmask(irqdata);
-
 	if (sense != -1) {
 		/* get current time */
 		do_gettimeofday(&tv);
@@ -341,15 +337,24 @@ static void read_pin_settings(struct device_node *node)
 
 static int init_port(void)
 {
-	int i, nlow, nhigh, ret, irq;
+	int i, nlow, nhigh, ret;
 	struct device_node *node;
+
+	node = lirc_rpi_dev->dev.of_node;
 
 	gpiochip = gpiochip_find("bcm2708_gpio", is_right_chip);
 
-	if (!gpiochip)
-		return -ENODEV;
+	/*
+	 * Because of the lack of a setpull function, only support
+	 * pinctrl-bcm2835 if using device tree.
+	*/
+	if (!gpiochip && node)
+		gpiochip = gpiochip_find("pinctrl-bcm2835", is_right_chip);
 
-	node = lirc_rpi_dev->dev.of_node;
+	if (!gpiochip) {
+		pr_err(LIRC_DRIVER_NAME ": gpio chip not found!\n");
+		return -ENODEV;
+	}
 
 	if (node) {
 		struct device_node *pins_node;
@@ -404,16 +409,8 @@ static int init_port(void)
 
 	gpiochip->set(gpiochip, gpio_out_pin, invert);
 
-	irq = gpiochip->to_irq(gpiochip, gpio_in_pin);
-	dprintk("to_irq %d\n", irq);
-	irqdata = irq_get_irq_data(irq);
-
-	if (irqdata && irqdata->chip) {
-		irqchip = irqdata->chip;
-	} else {
-		ret = -ENODEV;
-		goto exit_gpio_free_in_pin;
-	}
+	irq_num = gpiochip->to_irq(gpiochip, gpio_in_pin);
+	dprintk("to_irq %d\n", irq_num);
 
 	/* if pin is high, then this must be an active low receiver. */
 	if (sense == -1) {
@@ -445,9 +442,6 @@ static int init_port(void)
 
 	return 0;
 
-	exit_gpio_free_in_pin:
-	gpio_free(gpio_in_pin);
-
 	exit_gpio_free_out_pin:
 	gpio_free(gpio_out_pin);
 
@@ -459,20 +453,20 @@ static int init_port(void)
 static int set_use_inc(void *data)
 {
 	int result;
-	unsigned long flags;
 
 	/* initialize timestamp */
 	do_gettimeofday(&lasttv);
 
-	result = request_irq(gpiochip->to_irq(gpiochip, gpio_in_pin),
-			     (irq_handler_t) irq_handler, 0,
+	result = request_irq(irq_num,
+			     (irq_handler_t) irq_handler,
+			     IRQ_TYPE_EDGE_RISING | IRQ_TYPE_EDGE_FALLING,
 			     LIRC_DRIVER_NAME, (void*) 0);
 
 	switch (result) {
 	case -EBUSY:
 		printk(KERN_ERR LIRC_DRIVER_NAME
 		       ": IRQ %d is busy\n",
-		       gpiochip->to_irq(gpiochip, gpio_in_pin));
+		       irq_num);
 		return -EBUSY;
 	case -EINVAL:
 		printk(KERN_ERR LIRC_DRIVER_NAME
@@ -480,43 +474,26 @@ static int set_use_inc(void *data)
 		return -EINVAL;
 	default:
 		dprintk("Interrupt %d obtained\n",
-			gpiochip->to_irq(gpiochip, gpio_in_pin));
+			irq_num);
 		break;
 	};
 
 	/* initialize pulse/space widths */
 	init_timing_params(duty_cycle, freq);
 
-	spin_lock_irqsave(&lock, flags);
-
-	/* GPIO Pin Falling/Rising Edge Detect Enable */
-	irqchip->irq_set_type(irqdata,
-			      IRQ_TYPE_EDGE_RISING | IRQ_TYPE_EDGE_FALLING);
-
-	/* unmask the irq */
-	irqchip->irq_unmask(irqdata);
-
-	spin_unlock_irqrestore(&lock, flags);
-
 	return 0;
 }
 
 static void set_use_dec(void *data)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&lock, flags);
-
 	/* GPIO Pin Falling/Rising Edge Detect Disable */
-	irqchip->irq_set_type(irqdata, 0);
-	irqchip->irq_mask(irqdata);
+	irq_set_irq_type(irq_num, 0);
+	disable_irq(irq_num);
 
-	spin_unlock_irqrestore(&lock, flags);
-
-	free_irq(gpiochip->to_irq(gpiochip, gpio_in_pin), (void *) 0);
+	free_irq(irq_num, (void *) 0);
 
 	dprintk(KERN_INFO LIRC_DRIVER_NAME
-		": freed IRQ %d\n", gpiochip->to_irq(gpiochip, gpio_in_pin));
+		": freed IRQ %d\n", irq_num);
 }
 
 static ssize_t lirc_write(struct file *file, const char *buf,
@@ -691,7 +668,8 @@ static int __init lirc_rpi_init(void)
 
 static void lirc_rpi_exit(void)
 {
-	platform_device_unregister(lirc_rpi_dev);
+	if (!lirc_rpi_dev->dev.of_node)
+		platform_device_unregister(lirc_rpi_dev);
 	platform_driver_unregister(&lirc_rpi_driver);
 	lirc_buffer_free(&rbuf);
 }
@@ -735,12 +713,13 @@ static int __init lirc_rpi_init_module(void)
 
 static void __exit lirc_rpi_exit_module(void)
 {
+	lirc_unregister_driver(driver.minor);
+
 	gpio_free(gpio_out_pin);
 	gpio_free(gpio_in_pin);
 
 	lirc_rpi_exit();
 
-	lirc_unregister_driver(driver.minor);
 	printk(KERN_INFO LIRC_DRIVER_NAME ": cleaned up module\n");
 }
 
