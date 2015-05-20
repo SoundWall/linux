@@ -40,7 +40,7 @@ static int snd_rpi_proto_startup(struct snd_pcm_substream *substream)
 
 static int snd_rpi_proto_init(struct snd_soc_pcm_runtime *rtd)
 {
-// NOT USED struct snd_soc_codec *codec = rtd->codec;
+   // NOT USED struct snd_soc_codec *codec = rtd->codec;
 
    return 0;
 }
@@ -138,16 +138,17 @@ static int snd_rpi_proto_remove(struct platform_device *pdev)
 	return snd_soc_unregister_card(&snd_rpi_proto);
 }
 
-static const struct of_device_id rpi_proto_of_match[] = {
-   { .compatible = "rpiproto,rpi-proto", },
-   {},
+static const struct of_device_id snd_rpi_proto_of_match[] = {
+	{ .compatible = "rpi,rpi-proto", },
+	{},
 };
-MODULE_DEVICE_TABLE(of, rpi_proto_of_match);
+MODULE_DEVICE_TABLE(of, snd_rpi_proto_of_match);
 
 static struct platform_driver snd_rpi_proto_driver = {
 	.driver = {
 		.name   = "snd-rpi-proto",
 		.owner  = THIS_MODULE,
+		.of_match_table = snd_rpi_proto_of_match,
 	},
 	.probe	  = snd_rpi_proto_probe,
 	.remove	 = snd_rpi_proto_remove,
